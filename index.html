@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Redaction+35:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ninew program 5 file to music!</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            margin: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #stage {
+            position: fixed;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: min(100vw, calc(100vh * 4 / 3));
+            aspect-ratio: 4 / 3;
+        }
+
+        #design {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            container-type: inline-size;
+        }
+
+        #design canvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        #design input[type="file"] {
+            position: absolute;
+            top: 18%;
+            left: 40%;
+            color: #fff;
+            background: #151515;
+            border: 0.0833cqw solid #555;
+            padding: 0.5cqw;
+            font-family: "Redaction 35", serif;
+            font-size: 1.1667cqw;
+        }
+
+        #design input[type="file"].reverter-input {
+            top: 55.5%;
+        }
+
+        #design input[type="file"]::file-selector-button {
+            background: #111;
+            color: #fff;
+            border: 0.0833cqw solid #777;
+            padding: 0.6667cqw 1.1667cqw;
+            margin-right: 1cqw;
+            font-family: "Redaction 35", serif;
+            cursor: pointer;
+            font-size: 1.1667cqw;
+        }
+
+        #design input[type="file"]::file-selector-button:hover {
+            background: #444;
+        }
+
+        #design button {
+            position: absolute;
+            top: 18.3%;
+            left: 70%;
+            background: #333;
+            color: #fff;
+            border: 0.0833cqw solid #777;
+            padding: 0.6667cqw 1.1667cqw;
+            font-family: "Redaction 35", serif;
+            cursor: pointer;
+            font-size: 1.4cqw;
+        }
+
+        #design button:hover {
+            background: #444;
+        }
+
+        #design button:disabled {
+            opacity: 0.5;
+            cursor: wait;
+        }
+    </style>
+</head>
+<body>
+    <div id="stage">
+        <div id="design"></div>
+    </div>
+
+    <script>
+        let fileText = "";
+        let freq = [];
+        let currentFrequency = null;
+        let currentByte = 0;
+        let reverterFile = null;
+        let recoveredBytes = null;
+        let recoveredExtension = "bin";
+        let originalExtension = "bin";
+        let revertMarkerStart = "576039sndoxasodaaa";
+        let revertMarkerEnd = "aaasodkfnwod928hd0aks3";
+
+        let audioContext;
+        let activeOscillator;
+        let activeGain;
+        let decodedOutput;
+        let mode = 1;
+
+        let playbackToken = 0;
+        let isPlaying = false;
+
+        const freqInt = 12.5;
+        const wavSampleRate = 16000;
+        const toneBaseFrequency = 480;
+        const toneStep = 80;
+        const baseCycles = 6;
+        const maxBytes = 200000;
+
+        let estimateByte = 0;
+
+        let exportButton;
+        let revertButton;
+        let fileInput;
+        let reverterInput;
+
+        function setup() {
+            let canvas = createCanvas(1200, 900);
+            canvas.parent("design");
+
+            fileInput = createFileInput(handleFile);
+            fileInput.parent("design");
+
+            reverterInput = createFileInput(handleMp3File);
+            reverterInput.parent("design");
+            reverterInput.elt.accept = ".wav,audio/wav";
+            reverterInput.elt.classList.add("reverter-input");
+
+            decodedOutput = createElement("textarea");
+            decodedOutput.parent("design");
+            decodedOutput.elt.readOnly = true;
+            decodedOutput.elt.placeholder = "result will appear here";
+            decodedOutput.style("position", "absolute");
+            decodedOutput.style("top", "65%");
+            decodedOutput.style("left", "10%");
+            decodedOutput.style("width", "60%");
+            decodedOutput.style("height", "22%");
+            decodedOutput.style("resize", "none");
+            decodedOutput.style("color", "#fff");
+            decodedOutput.style("background", "#000");
+            decodedOutput.style("border", "1px solid #fff");
+            decodedOutput.style("outline", "none");
+
+            exportButton = createButton("Export!");
+            exportButton.parent("design");
+
+            revertButton = createButton("Revert!");
+            revertButton.parent("design");
+            revertButton.style("top", "72%");
+            revertButton.style("left", "75%");
+
+            setModeOn(fileInput, 1);
+            setModeOn(reverterInput, 2);
+            setModeOn(decodedOutput, 2);
+
+            exportButton.mousePressed(() => {
+                mode = 1;
+                exportWav();
+            });
+            revertButton.mousePressed(() => {
+                mode = 2;
+                revertWav();
+            });
+        }
+
+        function setModeOn(element, nextMode) {
+            element.mousePressed(() => mode = nextMode);
+        }
+
+        function formatTime(ms) {
+            let mins = floor(ms / 60000);
+            let remSec = floor((ms % 60000) / 1000);
+            let sec1 = floor(remSec / 10);
+            let sec2 = remSec % 10;
+            let mil = floor((ms % 1000) / 100);
+
+            return `${mins}:${sec1}${sec2}:${mil}`;
+        }
+
+        function draw() {
+            background(10);
+
+            fileInput.style("opacity", mode === 1 ? "1" : "0.3");
+            exportButton.style("opacity", mode === 1 ? "1" : "0.3");
+            revertButton.style("opacity", mode === 2 ? "1" : "0.3");
+            reverterInput.style("opacity", mode === 2 ? "1" : "0.3");
+            decodedOutput.style("opacity", mode === 2 ? "1" : "0.3");
+
+            push();
+            translate(600, 225);
+            scale(mode === 1 ? 1.015 : 1);
+            translate(-600, -225);
+            strokeWeight(mode === 1 ? 22 : 10);
+            fill(mode === 1 ? color(170, 0, 0) : color(35));
+            stroke(mode === 1 ? color(240, 25, 25) : color(75));
+            quad(10, 10, 1190, 10, 1190, 450, 10, 400);
+            pop();
+
+            push();
+            translate(600, 655);
+            scale(mode === 2 ? 1.015 : 1);
+            translate(-600, -655);
+            strokeWeight(mode === 2 ? 22 : 10);
+            fill(mode === 2 ? color(0, 25, 170) : color(35));
+            stroke(mode === 2 ? color(25, 80, 240) : color(75));
+            quad(10, 890, 1190, 889, 1190, 469, 10, 420);
+            pop();
+
+            noStroke();
+            textFont("Redaction 35");
+            textSize(22);
+            fill(mode === 1 ? 255 : 110);
+            text("ninew's file to beautiful sound transformer", 40, 190);
+
+            textSize(15);
+            text(
+                "estimated result sound file: " +
+                (estimateByte / 1000000).toFixed(1) +
+                " MB (" + Math.round(estimateByte/1000) + "KB,  "+Math.round(estimateByte)+" bytes)",
+                40,
+                330
+            );
+
+            fill(mode === 2 ? 255 : 110);
+            textSize(22);
+            text("ninew's beautiful sound to file reverter", 40, 530);
+
+            textSize(15);
+            text(
+                "if the original file was text, just copy and paste from here ↑",
+                260,
+                805
+            );
+
+            fill(mode === 1 ? 255 : 110);
+            textSize(14);
+
+            text(
+                currentFrequency === null
+                    ? "no file detected"
+                    : `Current frequency: ${currentFrequency} Hz | Tone: ${currentByte + 1} of ${freq.length}`,
+                40,
+                215
+            );
+
+            let totalMs = currentByte * freqInt;
+
+            fill(20);
+            stroke(100);
+            strokeWeight(1);
+            rect(208, 225, 40, 40);
+
+            fill(30);
+            rect(260, 235, 800, 20);
+
+            fill(200);
+            rect(
+                260 + (freq.length > 1
+                    ? currentByte / (freq.length - 1)
+                    : 0) * 780,
+                235,
+                10,
+                20
+            );
+
+            noStroke();
+            fill(mode === 1 ? 255 : 110);
+            textSize(13);
+
+            text(formatTime(totalMs), 260, 270);
+
+            let maxMs = freq.length * freqInt;
+            text(formatTime(maxMs), 1020, 270);
+
+            if (isPlaying) {
+                rect(220, 236, 5, 18);
+                rect(231, 236, 5, 18);
+            } else {
+                triangle(221, 235, 221, 255, 237, 245);
+            }
+        }
+
+        function mousePressed() {
+            if (mouseX >= 0 && mouseX <= width) {
+                mode = mouseY < map(mouseX, 10, 1190, 410, 459) ? 1 : 2;
+            }
+
+            if (
+                mouseX >= 208 &&
+                mouseX <= 248 &&
+                mouseY >= 225 &&
+                mouseY <= 265
+            ) {
+                if (isPlaying) {
+                    stopFreq();
+                } else {
+                    playFreq();
+                }
+            }
+        }
+
+        function revertWav() {
+            if (!recoveredBytes) {
+                alert("Please upload a WAV file first.");
+                return;
+            }
+
+            const mimeTypes = {
+                png: "image/png",
+                jpg: "image/jpeg",
+                jpeg: "image/jpeg",
+                gif: "image/gif",
+                webp: "image/webp",
+                txt: "text/plain",
+                pdf: "application/pdf",
+                json: "application/json",
+                html: "text/html",
+                csv: "text/csv"
+            };
+
+            const blob = new Blob(
+                [recoveredBytes],
+                {
+                    type: mimeTypes[recoveredExtension] ||
+                          "application/octet-stream"
+                }
+            );
+
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "recovered." + recoveredExtension;
+
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        async function handleFile(selectedFile) {
+            stopFreq();
+
+            if (!selectedFile || !selectedFile.file) {
+                fileText = "";
+                freq = [];
+                currentByte = 0;
+                currentFrequency = null;
+                estimateByte = 0;
+                return;
+            }
+
+            let fileName = selectedFile.file.name;
+            let dotIndex = fileName.lastIndexOf(".");
+            let extension = dotIndex >= 0
+                ? fileName.slice(dotIndex + 1).toLowerCase()
+                : "bin";
+
+            originalExtension = /^[a-z0-9]{1,12}$/.test(extension)
+                ? extension
+                : "bin";
+
+            if (selectedFile.file.size > maxBytes) {
+                fileText = "";
+                freq = [];
+                currentByte = 0;
+                currentFrequency = null;
+                estimateByte = 0;
+                fileInput.elt.value = "";
+
+                alert(
+                    `File too large! ${selectedFile.file.size} bytes. Maximum allowed: ${maxBytes} bytes.`
+                );
+
+                return;
+            }
+
+            const bytes = new Uint8Array(
+                await selectedFile.file.arrayBuffer()
+            );
+
+            fileText = new TextDecoder().decode(bytes);
+
+            freq = [];
+
+            for (const byte of bytes) {
+                const highNibble = byte >> 4;
+                const lowNibble = byte & 0x0F;
+
+                freq.push(
+                    toneBaseFrequency + toneStep * highNibble,
+                    toneBaseFrequency + toneStep * lowNibble
+                );
+            }
+
+            currentByte = 0;
+            currentFrequency = freq[0] ?? null;
+
+            const framesPerSymbol = wavSampleRate * freqInt / 1000;
+
+            estimateByte = 44 + freq.length * framesPerSymbol;
+        }
+
+        async function handleMp3File(selectedFile) {
+            if (!selectedFile || !selectedFile.file) return;
+
+            const file = selectedFile.file;
+
+            if (!file.name.toLowerCase().endsWith(".wav")) {
+                alert("Please choose a WAV file.");
+                return;
+            }
+
+            try {
+                const buffer = await file.arrayBuffer();
+
+                if (buffer.byteLength < 44) {
+                    throw new Error("File is too short.");
+                }
+
+                const view = new DataView(buffer);
+
+                function readFourCC(offset) {
+                    return String.fromCharCode(
+                        view.getUint8(offset),
+                        view.getUint8(offset + 1),
+                        view.getUint8(offset + 2),
+                        view.getUint8(offset + 3)
+                    );
+                }
+
+                if (readFourCC(0) !== "RIFF" || readFourCC(8) !== "WAVE") {
+                    throw new Error("Invalid WAV file.");
+                }
+
+                let riffEnd = view.getUint32(4, true) + 8;
+
+                if (riffEnd > buffer.byteLength || riffEnd < 12) {
+                    throw new Error("Incomplete WAV file.");
+                }
+
+                let formatInfo = null;
+                let dataOffset = -1;
+                let dataLength = -1;
+                let marker = "";
+
+                let offset = 12;
+
+                while (offset + 8 <= riffEnd) {
+                    let chunkId = readFourCC(offset);
+                    let chunkSize = view.getUint32(offset + 4, true);
+                    let payloadOffset = offset + 8;
+
+                    if (chunkSize > riffEnd - payloadOffset) {
+                        throw new Error("Incomplete WAV chunk.");
+                    }
+
+                    if (chunkId === "fmt ") {
+                        if (chunkSize < 16) {
+                            throw new Error("Invalid WAV format.");
+                        }
+
+                        formatInfo = {
+                            format: view.getUint16(payloadOffset, true),
+                            channels: view.getUint16(payloadOffset + 2, true),
+                            sampleRate: view.getUint32(payloadOffset + 4, true),
+                            bitDepth: view.getUint16(payloadOffset + 14, true)
+                        };
+                    } else if (chunkId === "data") {
+                        dataOffset = payloadOffset;
+                        dataLength = chunkSize;
+                    } else if (chunkId === "n9rv") {
+                        marker = new TextDecoder().decode(
+                            new Uint8Array(buffer, payloadOffset, chunkSize)
+                        );
+                    }
+
+                    offset = payloadOffset + chunkSize + (chunkSize % 2);
+                }
+
+                if (!formatInfo || dataOffset < 0) {
+                    throw new Error("Missing WAV format or audio data.");
+                }
+
+                if (
+                    formatInfo.format !== 1 ||
+                    formatInfo.sampleRate !== wavSampleRate ||
+                    formatInfo.channels !== 1 ||
+                    formatInfo.bitDepth !== 8
+                ) {
+                    throw new Error("Choose a WAV exported by this program.");
+                }
+
+                if (
+                    !marker.startsWith(revertMarkerStart) ||
+                    !marker.endsWith(revertMarkerEnd)
+                ) {
+                    throw new Error("Revert marker not found.");
+                }
+
+                let extension = marker.slice(
+                    revertMarkerStart.length,
+                    marker.length - revertMarkerEnd.length
+                ).toLowerCase();
+
+                if (!/^[a-z0-9]{1,12}$/.test(extension)) {
+                    throw new Error("Invalid original file extension.");
+                }
+
+                let framesPerSymbol = wavSampleRate * freqInt / 1000;
+
+                if (!Number.isInteger(framesPerSymbol)) {
+                    throw new Error("Invalid symbol duration.");
+                }
+
+                if (dataLength > buffer.byteLength - dataOffset) {
+                    throw new Error("Incomplete WAV data.");
+                }
+
+                if (dataLength % framesPerSymbol !== 0) {
+                    throw new Error("Incomplete WAV data.");
+                }
+
+                let symbolCount = dataLength / framesPerSymbol;
+
+                if (symbolCount % 2 !== 0) {
+                    throw new Error("Incomplete final byte.");
+                }
+
+                function readSample(frameIndex) {
+                    return view.getUint8(dataOffset + frameIndex) - 128;
+                }
+
+                function countCycles(symbolIndex) {
+                    let start = symbolIndex * framesPerSymbol;
+                    let crossings = 0;
+                    let previous = readSample(start);
+
+                    for (let i = 1; i < framesPerSymbol; i++) {
+                        let sample = readSample(start + i);
+
+                        if (previous <= 0 && sample > 0) {
+                            crossings++;
+                        }
+
+                        previous = sample;
+                    }
+
+                    return crossings;
+                }
+
+                let recovered = new Uint8Array(symbolCount / 2);
+
+                for (let i = 0; i < recovered.length; i++) {
+                    let high = countCycles(i * 2) - baseCycles;
+                    let low = countCycles(i * 2 + 1) - baseCycles;
+
+                    if (
+                        high < 0 || high > 15 ||
+                        low < 0 || low > 15
+                    ) {
+                        throw new Error(
+                            "Tone could not be decoded. Use the original WAV without converting it."
+                        );
+                    }
+
+                    recovered[i] = (high << 4) | low;
+                }
+
+                recoveredBytes = recovered;
+                recoveredExtension = extension;
+                decodedOutput.elt.value = new TextDecoder().decode(recovered);
+                reverterFile = file;
+
+            } catch (error) {
+                recoveredBytes = null;
+                decodedOutput.elt.value = "";
+                alert("Could not decode WAV: " + error.message);
+            }
+        }
+
+        async function playFreq() {
+            if (freq.length === 0) return;
+
+            const token = ++playbackToken;
+
+            isPlaying = true;
+
+            audioContext ??= new (
+                window.AudioContext ||
+                window.webkitAudioContext
+            )();
+
+            await audioContext.resume();
+
+            if (token !== playbackToken) return;
+
+            activeOscillator = audioContext.createOscillator();
+            activeGain = audioContext.createGain();
+
+            activeOscillator.type = "sine";
+
+            activeGain.gain.setValueAtTime(
+                0.03,
+                audioContext.currentTime
+            );
+
+            activeOscillator.connect(activeGain);
+            activeGain.connect(audioContext.destination);
+
+            activeOscillator.start();
+
+            for (let i = currentByte; i < freq.length; i++) {
+                if (token !== playbackToken) return;
+
+                currentByte = i;
+                currentFrequency = freq[i];
+
+                activeOscillator.frequency.setValueAtTime(
+                    currentFrequency,
+                    audioContext.currentTime
+                );
+
+                await new Promise(
+                    resolve => setTimeout(resolve, freqInt)
+                );
+            }
+
+            if (token === playbackToken) {
+                stopAudio();
+
+                isPlaying = false;
+                currentByte = 0;
+                currentFrequency = freq[0] ?? null;
+            }
+        }
+
+        function stopFreq() {
+            playbackToken++;
+            isPlaying = false;
+
+            stopAudio();
+
+            currentFrequency = freq[0] ?? null;
+        }
+
+        function stopAudio() {
+            if (activeGain && audioContext) {
+                activeGain.gain.cancelScheduledValues(
+                    audioContext.currentTime
+                );
+
+                activeGain.gain.setValueAtTime(
+                    0,
+                    audioContext.currentTime
+                );
+            }
+
+            if (activeOscillator) {
+                try {
+                    activeOscillator.stop();
+                } catch (error) {
+                }
+            }
+
+            activeOscillator = null;
+            activeGain = null;
+        }
+
+        async function exportWav() {
+            if (freq.length === 0) {
+                alert("bro youre supposed to upload a file");
+                return;
+            }
+
+            const frequencies = [...freq];
+
+            const sampleRate = wavSampleRate;
+            const framesPerSymbol = sampleRate * freqInt / 1000;
+
+            if (!Number.isInteger(framesPerSymbol)) {
+                alert("Invalid symbol duration.");
+                return;
+            }
+
+            const frameCount = frequencies.length * framesPerSymbol;
+
+            const numChannels = 1;
+            const bitDepth = 8;
+            const blockAlign = 1;
+
+            const dataLength = frameCount;
+
+            exportButton.elt.disabled = true;
+            exportButton.html("Generating...");
+
+            await new Promise(
+                resolve => requestAnimationFrame(resolve)
+            );
+
+            try {
+                const markerBytes = new TextEncoder().encode(
+                    revertMarkerStart +
+                    originalExtension.toUpperCase() +
+                    revertMarkerEnd
+                );
+
+                const markerOffset = 44 + dataLength + (dataLength % 2);
+                const totalLength = markerOffset + 8 + markerBytes.length + (markerBytes.length % 2);
+
+                const arrayBuffer = new ArrayBuffer(totalLength);
+                const view = new DataView(arrayBuffer);
+
+                function writeString(offset, string) {
+                    for (let i = 0; i < string.length; i++) {
+                        view.setUint8(
+                            offset + i,
+                            string.charCodeAt(i)
+                        );
+                    }
+                }
+
+                writeString(0, "RIFF");
+                view.setUint32(4, totalLength - 8, true);
+                writeString(8, "WAVE");
+
+                writeString(12, "fmt ");
+                view.setUint32(16, 16, true);
+                view.setUint16(20, 1, true);
+                view.setUint16(22, numChannels, true);
+                view.setUint32(24, sampleRate, true);
+                view.setUint32(28, sampleRate * blockAlign, true);
+                view.setUint16(32, blockAlign, true);
+                view.setUint16(34, bitDepth, true);
+
+                writeString(36, "data");
+                view.setUint32(40, dataLength, true);
+
+                writeString(markerOffset, "n9rv");
+                view.setUint32(markerOffset + 4, markerBytes.length, true);
+
+                new Uint8Array(
+                    arrayBuffer,
+                    markerOffset + 8,
+                    markerBytes.length
+                ).set(markerBytes);
+
+                const toneWaves = [];
+
+                for (let n = 0; n < 16; n++) {
+                    const wave = new Uint8Array(framesPerSymbol);
+
+                    const frequency =
+                        toneBaseFrequency + toneStep * n;
+
+                    for (let j = 0; j < framesPerSymbol; j++) {
+                        const phase =
+                            (j * frequency / sampleRate) % 1;
+
+                        wave[j] =
+                            128 + Math.round(
+                                Math.sin(2 * Math.PI * phase) * 90
+                            );
+                    }
+
+                    toneWaves.push(wave);
+                }
+
+                const samples = new Uint8Array(
+                    arrayBuffer,
+                    44,
+                    frameCount
+                );
+
+                for (let i = 0; i < frequencies.length; i++) {
+                    const nibble = Math.round(
+                        (frequencies[i] - toneBaseFrequency) / toneStep
+                    );
+
+                    if (nibble < 0 || nibble > 15) {
+                        throw new Error("Invalid frequency.");
+                    }
+
+                    samples.set(
+                        toneWaves[nibble],
+                        i * framesPerSymbol
+                    );
+
+                    if (
+                        (i + 1) % 1000 === 0 ||
+                        i === frequencies.length - 1
+                    ) {
+                        exportButton.html(
+                            `Generating ${i + 1}/${frequencies.length}`
+                        );
+
+                        await new Promise(
+                            resolve => requestAnimationFrame(resolve)
+                        );
+                    }
+                }
+
+                exportButton.html("Preparing WAV...");
+
+                const wavBlob = new Blob(
+                    [arrayBuffer],
+                    { type: "audio/wav" }
+                );
+
+                const url = URL.createObjectURL(wavBlob);
+
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = "supersecretfile.wav";
+
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+
+                setTimeout(
+                    () => URL.revokeObjectURL(url),
+                    1000
+                );
+
+            } catch (error) {
+                console.error(error);
+                alert("Export failed: " + error.message);
+
+            } finally {
+                exportButton.elt.disabled = false;
+                exportButton.html("Export!");
+            }
+        }
+    </script>
+</body>
+</html>
